@@ -19,6 +19,12 @@ interface SearchResult {
   error?: string
 }
 
+interface NewsAPIResponse {
+  status: string
+  totalResults: number
+  articles: Omit<NewsArticle, 'searchKeyword'>[]
+}
+
 interface NewsResponse {
   source: 'NewsAPI'
   data: {
@@ -30,7 +36,7 @@ interface NewsResponse {
 }
 
 /**
- * Fetches news data from the NewsAPI for each keyword.
+ * Fetches recent news articles for a given comma-separated keyword list.
  */
 export async function fetchNewsData(newsInput: string): Promise<NewsResponse | null> {
   const apiKey = process.env.NEWS_API_KEY
@@ -41,11 +47,10 @@ export async function fetchNewsData(newsInput: string): Promise<NewsResponse | n
   }
 
   try {
-    // Split and clean keywords
     const keywords = newsInput
       .split(',')
-      .map((keyword) => keyword.trim())
-      .filter((keyword) => keyword.length > 0)
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0)
 
     const allArticles: NewsArticle[] = []
     const searchResults: SearchResult[] = []
@@ -59,11 +64,12 @@ export async function fetchNewsData(newsInput: string): Promise<NewsResponse | n
           keyword
         )}&apiKey=${apiKey}&pageSize=3&sortBy=publishedAt`
 
-        const newsResponse = await axios.get(newsUrl, { timeout: 8000 })
-        const articles = newsResponse.data?.articles || []
+        // ✅ Strongly typed axios call
+        const res = await axios.get<NewsAPIResponse>(newsUrl, { timeout: 8000 })
+        const articles = res.data?.articles || []
 
         if (articles.length > 0) {
-          const articlesWithKeyword: NewsArticle[] = articles.map((article: any) => ({
+          const articlesWithKeyword: NewsArticle[] = articles.map((article) => ({
             ...article,
             searchKeyword: keyword,
           }))
@@ -76,10 +82,7 @@ export async function fetchNewsData(newsInput: string): Promise<NewsResponse | n
           })
         }
 
-        // Small delay to avoid API rate limiting
-        if (i < keywords.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 200))
-        }
+        if (i < keywords.length - 1) await new Promise((res) => setTimeout(res, 200))
       } catch (keywordError: any) {
         console.error(`❌ Error searching for "${keyword}":`, keywordError.message)
         searchResults.push({
@@ -90,7 +93,7 @@ export async function fetchNewsData(newsInput: string): Promise<NewsResponse | n
       }
     }
 
-    // Remove duplicates based on URL
+    // ✅ Deduplicate by URL
     const uniqueArticles = allArticles.filter(
       (article, index, self) => index === self.findIndex((a) => a.url === article.url)
     )
