@@ -1,138 +1,80 @@
-import axios from 'axios'
+// src/app/api/sources/wikiController.ts
+import { geminiStageTwo } from "./geminiController";
 
-interface WikiAPIResponse {
-  title: string
-  extract: string
-  description?: string
-  thumbnail?: { source: string; width: number; height: number }
-  content_urls?: { desktop?: { page?: string } }
-}
-
-interface WikiSummary extends WikiAPIResponse {
-  searchKeyword: string
-  actualSearchTerm?: string
-  url: string
-}
-
-interface WikiSearchResult {
-  keyword: string
-  found: boolean
-  title?: string
-  actualSearchTerm?: string
-  url?: string
-  error?: string
-}
-
-interface WikiResponse {
-  source: 'Wikipedia'
-  data: WikiSummary[]
-  searchSummary: WikiSearchResult[]
-  totalResults: number
-}
-
-/**
- * Fetches Wikipedia summaries for each keyword.
- */
-export async function fetchWikiData(wikiInput: string): Promise<WikiResponse | null> {
+export async function fetchWikiInsights(wikiKeywords: string) {
   try {
-    const keywords = wikiInput
-      .split(',')
-      .map((k) => k.trim())
-      .filter((k) => k.length > 0)
+    const searchTerm = encodeURIComponent(wikiKeywords);
 
-    console.log('🔍 Keywords to search:', keywords)
+    // 1. --- SEARCH WIKIPEDIA TITLES ---
+    const searchRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${searchTerm}&format=json&utf8=1`
+    );
 
-    const allWikiData: WikiSummary[] = []
-    const searchResults: WikiSearchResult[] = []
-
-    for (let i = 0; i < keywords.length; i++) {
-      const keyword = keywords[i]
-      console.log(`\n📖 Searching ${i + 1}/${keywords.length}: "${keyword}"`)
-
-      try {
-        const wikipediaUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(keyword)}`
-        const res = await axios.get<WikiAPIResponse>(wikipediaUrl, { timeout: 5000 })
-
-        if (res.data?.extract) {
-          console.log(`✅ Wikipedia data found for "${keyword}"`)
-          const wikiEntry: WikiSummary = {
-            ...res.data,
-            searchKeyword: keyword,
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(keyword)}`,
-          }
-
-          allWikiData.push(wikiEntry)
-          searchResults.push({
-            keyword,
-            found: true,
-            title: res.data.title,
-            url: wikiEntry.url,
-          })
-        } else {
-          console.log(`⚠️ No Wikipedia data for "${keyword}"`)
-          searchResults.push({ keyword, found: false, error: 'No extract found' })
-        }
-
-        if (i < keywords.length - 1) await new Promise((res) => setTimeout(res, 200))
-      } catch (keywordError: any) {
-        console.error(`❌ Error searching for "${keyword}":`, keywordError.message)
-
-        const words = keyword.split(' ').filter((w) => w.length > 3)
-        let foundAlternative = false
-
-        for (const word of words) {
-          try {
-            const wordUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(word)}`
-            const wordRes = await axios.get<WikiAPIResponse>(wordUrl, { timeout: 3000 })
-
-            if (wordRes.data?.extract) {
-              console.log(`✅ Wikipedia data found for word "${word}" from keyword "${keyword}"`)
-              const wikiEntry: WikiSummary = {
-                ...wordRes.data,
-                searchKeyword: keyword,
-                actualSearchTerm: word,
-                url: `https://en.wikipedia.org/wiki/${encodeURIComponent(word)}`,
-              }
-
-              allWikiData.push(wikiEntry)
-              searchResults.push({
-                keyword,
-                found: true,
-                actualSearchTerm: word,
-                title: wordRes.data.title,
-                url: wikiEntry.url,
-              })
-
-              foundAlternative = true
-              break
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-
-        if (!foundAlternative) {
-          searchResults.push({ keyword, found: false, error: keywordError.message })
-        }
-      }
+    if (!searchRes.ok) {
+      console.error("Failed to search Wikipedia");
+      return null;
     }
 
-    console.log(`📖 Total Wikipedia entries found: ${allWikiData.length}`)
+    const searchJson = await searchRes.json();
+    const firstResult = searchJson.query?.search?.[0];
 
-    if (allWikiData.length > 0) {
-      console.log('✅ WIKIPEDIA API - Success')
-      return {
-        source: 'Wikipedia',
-        data: allWikiData.slice(0, 5),
-        searchSummary: searchResults,
-        totalResults: allWikiData.length,
-      }
+    if (!firstResult) {
+      console.error("Wikipedia returned no results");
+      return null;
     }
 
-    console.warn('⚠️ No Wikipedia data found for any keywords')
-    return null
-  } catch (error: any) {
-    console.error('❌ WIKIPEDIA API CRITICAL ERROR:', error.message)
-    return null
+    const pageTitle = firstResult.title;
+
+    // 2. --- GET FULL ARTICLE SUMMARY + CONTENT ---
+    const pageRes = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`
+    );
+
+    if (!pageRes.ok) {
+      console.error("Failed to fetch Wikipedia page summary");
+      return null;
+    }
+
+    const summaryJson = await pageRes.json();
+
+    // 3. --- GET SECTIONS (OPTIONAL BUT USEFUL) ---
+    const sectionsRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=parse&page=${encodeURIComponent(
+        pageTitle
+      )}&prop=sections&format=json`
+    );
+
+    const sectionsJson = sectionsRes.ok ? await sectionsRes.json() : null;
+    const sections = sectionsJson?.parse?.sections || [];
+
+    // 4. --- PREP COMPRESSED RAW DATA ---
+    const rawData = {
+      title: summaryJson.title,
+      description: summaryJson.description,
+      extract: summaryJson.extract,
+      sections: sections.map((s: any) => s.line).slice(0, 10),
+    };
+
+    // 5. --- GEMINI STAGE TWO INSTRUCTIONS ---
+    const instructions = `{
+      "topicDefinition": "A clear beginner-friendly definition of the topic",
+      "keyConcepts": "3–6 important concepts related to this topic",
+      "industryApplications": "Practical uses or applications in the real world",
+      "historicalContext": "Important timeline or historical evolution",
+      "currentRelevance": "Why this topic matters today",
+      "overallSummary": "2–3 line summary combining all insights"
+    }`;
+
+    // 6. --- CALL GEMINI STAGE TWO ---
+    const insights = await geminiStageTwo(
+      JSON.stringify(rawData),
+      "WikipediaAPI",
+      instructions
+    );
+
+    return insights || null;
+  } catch (err) {
+    console.error("Wikipedia Insights Error:", err);
+    return null;
   }
 }

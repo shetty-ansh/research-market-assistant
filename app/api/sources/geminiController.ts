@@ -3,9 +3,7 @@ import { GoogleGenAI } from '@google/genai'
 interface GeminiKeywords {
   newsInput: string
   serpInput: string
-  clearbitInput: string
   wikiInput: string
-  twitterInput: string
   redditInput: string
   trendsInput: string
 }
@@ -32,7 +30,7 @@ interface GeminiReport {
   sources: string[]
 }
 
-export async function getGeminiKeywords(idea: string): Promise<GeminiKeywords | null> {
+export async function geminiStageOne(idea: string): Promise<GeminiKeywords | null> {
   const apiKey = process.env.GEMINI_API_KEY
 
   if (!apiKey) {
@@ -48,7 +46,7 @@ Role: You are an expert market analyst responsible for extracting the most preci
 Idea: ${idea}
 
 Output Constraint: You must provide the output as a single JSON object with the following exact keys: 
-newsInput, serpInput, clearbitInput, wikiInput, twitterInput, redditInput, and trendsInput. 
+newsInput, serpInput, wikiInput, redditInput, and trendsInput. 
 
 Each of these will be used for relevant searches to find the latest data or trends. 
 Example: redditInput will be used to find recent discussions related to the idea. 
@@ -77,9 +75,7 @@ NO ADDITIONAL TEXT — output ONLY the JSON object.
     console.log('✅ Extracted Gemini Keywords:')
     console.log('  - News:', parsedInputsResult.newsInput)
     console.log('  - Serp:', parsedInputsResult.serpInput)
-    console.log('  - Clearbit:', parsedInputsResult.clearbitInput)
     console.log('  - Wiki:', parsedInputsResult.wikiInput)
-    console.log('  - Twitter:', parsedInputsResult.twitterInput)
     console.log('  - Reddit:', parsedInputsResult.redditInput)
     console.log('  - Trends:', parsedInputsResult.trendsInput)
 
@@ -98,13 +94,62 @@ NO ADDITIONAL TEXT — output ONLY the JSON object.
   }
 }
 
-export async function getGeminiReport(
+export async function geminiStageTwo (rawData : string , source: string, instructions : string) : Promise <string | null>{
+   const apiKey = process.env.GEMINI_API_KEY
+
+  if (!apiKey) {
+    console.error('⚠️ GEMINI AI - No API key provided')
+    return null
+  }
+
+  const ai = new GoogleGenAI({ apiKey })
+
+  const prompt = `You need to analyse raw data from ${source} and structure a response including these parameters${instructions}.
+  You must provide the output as a single JSON object. NO ADDITIONAL TEXT — output ONLY the JSON object. The insights you extract will
+  be used to generate reports as a part of a bigger operation.Structure your response accordingly.
+  
+  Sample - 
+  { parameter1: insight1,
+    parameter2: insight2
+  }`
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: prompt }],
+        },
+      ],
+    })
+
+    const generatedInsights = response?.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!generatedInsights) throw new Error('Gemini did not return valid text content.')
+
+    const cleanText = generatedInsights.replace(/```json|```/g, '').trim()
+    const parsedResult = JSON.parse(cleanText)
+
+    return parsedResult
+  } catch (error: any) {
+    if (error.response) {
+      console.log('📊 GEMINI API ERROR RESPONSE:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data,
+      })
+    } else {
+      console.error('⚠️ Unexpected Error:', error)
+    }
+    return null
+  }
+}
+
+export async function geminiStageThree(
   idea: string,
   newsData: any,
   serpData: any,
-  clearbitData: any,
   wikiData: any,
-  twitterData: any,
   redditData: any,
   trendsData: any
 ): Promise<GeminiReport | null> {
@@ -134,21 +179,17 @@ The following data sources are provided — use each to extract relevant insight
 📊 **Data Sources**
 - NewsAPI → current industry headlines, tone, and trends
 - SerpAPI → competitors, products, search patterns
-- Clearbit → company, funding, and firmographic details
 - Wikipedia → broad market or technical overviews
-- Twitter → sentiment and trending public discussions
 - Reddit → user opinions, frustrations, and needs
 - Google Trends → interest trajectory and seasonality
 
-🧩 **User Idea**
+🧩**User Idea**
 ${idea}
 
 🗂 **Structured Data Inputs**
 News Data: ${safeStringify(newsData)}
 Serp Data: ${safeStringify(serpData)}
-Clearbit Data: ${safeStringify(clearbitData)}
 Wiki Data: ${safeStringify(wikiData)}
-Twitter Data: ${safeStringify(twitterData)}
 Reddit Data: ${safeStringify(redditData)}
 Google Trends Data: ${safeStringify(trendsData)}
 
@@ -174,9 +215,7 @@ Google Trends Data: ${safeStringify(trendsData)}
     const availability = {
       News: !!newsData,
       Serp: !!serpData,
-      Clearbit: !!clearbitData,
       Wiki: !!wikiData,
-      Twitter: !!twitterData,
       Reddit: !!redditData,
       Trends: !!trendsData,
     }
@@ -209,3 +248,7 @@ Google Trends Data: ${safeStringify(trendsData)}
     return null
   }
 }
+
+
+
+

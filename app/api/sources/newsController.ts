@@ -1,122 +1,62 @@
-import axios from 'axios'
+// src/app/api/sources/newsController.ts (or anywhere you want)
+import { geminiStageTwo } from "./geminiController";
 
-interface NewsArticle {
-  source?: { id?: string; name?: string }
-  author?: string
-  title?: string
-  description?: string
-  url: string
-  urlToImage?: string
-  publishedAt?: string
-  content?: string
-  searchKeyword: string
-}
-
-interface SearchResult {
-  keyword: string
-  articlesCount: number
-  url?: string
-  error?: string
-}
-
-interface NewsAPIResponse {
-  status: string
-  totalResults: number
-  articles: Omit<NewsArticle, 'searchKeyword'>[]
-}
-
-interface NewsResponse {
-  source: 'NewsAPI'
-  data: {
-    articles: NewsArticle[]
-    totalResults: number
-    searchResults: SearchResult[]
-  }
-  searchSummary: SearchResult[]
-}
-
-/**
- * Fetches recent news articles for a given comma-separated keyword list.
- */
-export async function fetchNewsData(newsInput: string): Promise<NewsResponse | null> {
-  const apiKey = process.env.NEWS_API_KEY
+export async function fetchNewsInsights(newsKeywords: string) {
+  const apiKey = process.env.NEWS_API_KEY;
+  const baseUrl = "https://newsapi.org/v2/everything";
 
   if (!apiKey) {
-    console.warn('⚠️ NEWS API - No API key provided')
-    return null
+    console.error("Missing NEWS API key");
+    return null;
   }
 
   try {
-    const keywords = newsInput
-      .split(',')
-      .map((k) => k.trim())
-      .filter((k) => k.length > 0)
+    // 1. Fetch raw news articles
+    const newsRes = await fetch(
+      `${baseUrl}?q=${encodeURIComponent(newsKeywords)}&sortBy=publishedAt&pageSize=15&apiKey=${apiKey}`
+    );
 
-    const allArticles: NewsArticle[] = []
-    const searchResults: SearchResult[] = []
-
-    for (let i = 0; i < keywords.length; i++) {
-      const keyword = keywords[i]
-      console.log(`\n📰 Searching ${i + 1}/${keywords.length}: "${keyword}"`)
-
-      try {
-        const newsUrl = `https://newsapi.org/v2/everything?q=${encodeURIComponent(
-          keyword
-        )}&apiKey=${apiKey}&pageSize=3&sortBy=publishedAt`
-
-        // ✅ Strongly typed axios call
-        const res = await axios.get<NewsAPIResponse>(newsUrl, { timeout: 8000 })
-        const articles = res.data?.articles || []
-
-        if (articles.length > 0) {
-          const articlesWithKeyword: NewsArticle[] = articles.map((article) => ({
-            ...article,
-            searchKeyword: keyword,
-          }))
-
-          allArticles.push(...articlesWithKeyword)
-          searchResults.push({
-            keyword,
-            articlesCount: articles.length,
-            url: newsUrl.replace(apiKey, '[API_KEY]'),
-          })
-        }
-
-        if (i < keywords.length - 1) await new Promise((res) => setTimeout(res, 200))
-      } catch (keywordError: any) {
-        console.error(`❌ Error searching for "${keyword}":`, keywordError.message)
-        searchResults.push({
-          keyword,
-          error: keywordError.message,
-          articlesCount: 0,
-        })
-      }
+    if (!newsRes.ok) {
+      console.error("Failed to fetch news");
+      return null;
     }
 
-    // ✅ Deduplicate by URL
-    const uniqueArticles = allArticles.filter(
-      (article, index, self) => index === self.findIndex((a) => a.url === article.url)
-    )
+    const news = await newsRes.json();
+    const articles = news.articles || [];
 
-    console.log(`📰 Total unique articles found: ${uniqueArticles.length}`)
+    // 2. Prepare raw data for LLM (compact)
+    const rawData = articles
+      .map((a: { title: any; description: any; publishedAt: any; source: { name: any; }; content: any; }) => ({
+        title: a.title,
+        description: a.description,
+        publishedAt: a.publishedAt,
+        source: a.source?.name,
+        content: a.content,
+      }))
+      .slice(0, 15);
 
-    if (uniqueArticles.length > 0) {
-      console.log('✅ NEWS API - Success')
-      return {
-        source: 'NewsAPI',
-        data: {
-          articles: uniqueArticles.slice(0, 15),
-          totalResults: uniqueArticles.length,
-          searchResults,
-        },
-        searchSummary: searchResults,
-      }
-    }
+    // 3. Instructions for Gemini Stage 2
+    const instructions = `{
+      "articleCount": "Total number of articles analyzed",
+      "recency": "Analyse ow fresh the news is",
+      "sentimentScore": "Overall sentiment score (-1 to +1)",
+      "topThemes": "3–5 recurring themes",
+      "marketRisks": "Major risks mentioned",
+      "marketOpportunities": "Major opportunities mentioned",
+      "commonKeywords": "Most common keywords across articles",
+      "overallSummary": "Short 2–3 line news summary"
+    }`;
 
-    console.warn('⚠️ NEWS API - No articles found for any keywords')
-    return null
-  } catch (error: any) {
-    console.error('❌ NEWS API ERROR:', error.message)
-    return null
+    // 4. Call Gemini Stage Two
+    const insights = await geminiStageTwo(
+      JSON.stringify(rawData),
+      "NewsAPI",
+      instructions
+    );
+
+    return insights || null;
+  } catch (err) {
+    console.error("News Insight Error:", err);
+    return null;
   }
 }
