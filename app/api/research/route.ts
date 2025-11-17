@@ -293,35 +293,35 @@ export async function POST(req: NextRequest) {
         // ----------------------------
 
         console.log("📌 [STEP 3.1] Fetching News Insights...");
-        const newsInsights = await fetchNewsInsights(newsKeywords).catch(err => {
+        const newsInsights = await fetchNewsInsights(newsKeywords, idea).catch(err => {
             console.error("❌ NEWS Insights Error:", err);
             return null;
         });
         console.log("📰 News Insights:", newsInsights);
 
         console.log("📌 [STEP 3.2] Fetching SERP Insights...");
-        const serpInsights = await fetchSerpInsights(serpKeywords).catch(err => {
+        const serpInsights = await fetchSerpInsights(serpKeywords, idea).catch(err => {
             console.error("❌ SERP Insights Error:", err);
             return null;
         });
         console.log("🔍 SERP Insights:", serpInsights);
 
         console.log("📌 [STEP 3.3] Fetching Reddit Insights...");
-        const redditInsights = await fetchRedditInsights(redditKeywords).catch(err => {
+        const redditInsights = await fetchRedditInsights(redditKeywords, idea).catch(err => {
             console.error("❌ Reddit Insights Error:", err);
             return null;
         });
         console.log("👽 Reddit Insights:", redditInsights);
 
         console.log("📌 [STEP 3.4] Fetching Trends Insights...");
-        const trendsInsights = await fetchTrendsInsights(trendsKeywords).catch(err => {
+        const trendsInsights = await fetchTrendsInsights(trendsKeywords, idea).catch(err => {
             console.error("❌ Trends Insights Error:", err);
             return null;
         });
         console.log("📈 Google Trends Insights:", trendsInsights);
 
         console.log("📌 [STEP 3.5] Fetching Wikipedia Insights...");
-        const wikiInsights = await fetchWikiInsights(wikiKeywords).catch(err => {
+        const wikiInsights = await fetchWikiInsights(wikiKeywords, idea).catch(err => {
             console.error("❌ Wikipedia Insights Error:", err);
             return null;
         });

@@ -1,7 +1,7 @@
 // src/app/api/sources/newsController.ts (or anywhere you want)
 import { geminiStageTwo } from "./geminiController";
 
-export async function fetchNewsInsights(newsKeywords: string) {
+export async function fetchNewsInsights(newsKeywords: string, originalIdea?: string) {
   const apiKey = process.env.NEWS_API_KEY;
   const baseUrl = "https://newsapi.org/v2/everything";
 
@@ -51,7 +51,8 @@ export async function fetchNewsInsights(newsKeywords: string) {
     const insights = await geminiStageTwo(
       JSON.stringify(rawData),
       "NewsAPI",
-      instructions
+      instructions,
+      originalIdea
     );
 
     return insights || null;

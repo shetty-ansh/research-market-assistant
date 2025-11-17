@@ -1,7 +1,7 @@
 // src/app/api/sources/wikiController.ts
 import { geminiStageTwo } from "./geminiController";
 
-export async function fetchWikiInsights(wikiKeywords: string) {
+export async function fetchWikiInsights(wikiKeywords: string, originalIdea?: string) {
   try {
     const searchTerm = encodeURIComponent(wikiKeywords);
 
@@ -69,7 +69,8 @@ export async function fetchWikiInsights(wikiKeywords: string) {
     const insights = await geminiStageTwo(
       JSON.stringify(rawData),
       "WikipediaAPI",
-      instructions
+      instructions,
+      originalIdea
     );
 
     return insights || null;

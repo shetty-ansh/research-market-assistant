@@ -94,7 +94,7 @@ NO ADDITIONAL TEXT — output ONLY the JSON object.
   }
 }
 
-export async function geminiStageTwo (rawData : string , source: string, instructions : string) : Promise <string | null>{
+export async function geminiStageTwo (rawData : string , source: string, instructions : string, originalIdea?: string) : Promise <string | null>{
    const apiKey = process.env.GEMINI_API_KEY
 
   if (!apiKey) {
@@ -104,9 +104,20 @@ export async function geminiStageTwo (rawData : string , source: string, instruc
 
   const ai = new GoogleGenAI({ apiKey })
 
+  const contextSection = originalIdea ? `
+  
+  BUSINESS IDEA CONTEXT:
+  The user is researching this business idea: "${originalIdea}"
+  
+  IMPORTANT: Tailor all insights specifically to this business idea. Focus on how the data relates to this specific concept, market, or industry.
+  ` : '';
+
   const prompt = `You need to analyse raw data from ${source} and structure a response including these parameters${instructions}.
   You must provide the output as a single JSON object. NO ADDITIONAL TEXT — output ONLY the JSON object. The insights you extract will
-  be used to generate reports as a part of a bigger operation.Structure your response accordingly.
+  be used to generate reports as a part of a bigger operation.Structure your response accordingly.${contextSection}
+  
+  Raw Data to Analyze:
+  ${rawData}
   
   Sample - 
   { parameter1: insight1,

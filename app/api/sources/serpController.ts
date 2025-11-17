@@ -1,7 +1,7 @@
 // src/app/api/sources/serpController.ts
 import { geminiStageTwo } from "./geminiController";
 
-export async function fetchSerpInsights(serpKeywords: string) {
+export async function fetchSerpInsights(serpKeywords: string, originalIdea?: string) {
   const apiKey = process.env.SERP_API_KEY;
 
   if (!apiKey) {
@@ -50,7 +50,6 @@ export async function fetchSerpInsights(serpKeywords: string) {
       "competitorList": "Top competitors appearing in organic results",
       "adPresence": "Whether ads are heavy, moderate, or minimal",
       "topQuestions": "Most common questions people ask",
-      "keywordIntent": "User search intent behind the queries",
       "marketOpportunities": "Gaps competitors aren't addressing",
       "overallSummary": "2–3 line summary of the search landscape"
     }`;
@@ -59,7 +58,8 @@ export async function fetchSerpInsights(serpKeywords: string) {
     const insights = await geminiStageTwo(
       JSON.stringify(rawData),
       "SERPAPI",
-      instructions
+      instructions,
+      originalIdea
     );
 
     return insights || null;

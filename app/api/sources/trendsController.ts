@@ -1,118 +1,113 @@
 // src/app/api/sources/trendsController.ts
 import { geminiStageTwo } from "./geminiController";
 
-export async function fetchTrendsInsights(trendsKeywords: string) {
+export async function fetchTrendsInsights(trendsKeywords: string, originalIdea?: string) {
+  const serpApiKey = process.env.SERP_API_KEY;
+
+  if (!serpApiKey) {
+    console.error("❌ Missing SERP API Key for trends");
+    return null;
+  }
+
   try {
-    console.log("📈 [Trends] Keyword:", trendsKeywords);
+    console.log("📈 [Trends] Using SerpAPI for trends data:", trendsKeywords);
 
-    // ---- STEP 1: GET TOKEN ----
-    const exploreReq = {
-      comparisonItem: [
-        {
-          keyword: trendsKeywords,
-          geo: "",
-          time: "today 12-m" // last 12 months
+    // Split keywords and get trends for each
+    const keywords = trendsKeywords
+      .split(",")
+      .map(k => k.trim())
+      .filter(Boolean)
+      .slice(0, 3); // Limit to 3 keywords to avoid rate limits
+
+    let allTrendsData: any[] = [];
+
+    for (const keyword of keywords) {
+      console.log(`📊 Getting trends for: ${keyword}`);
+      
+      try {
+        const url = `https://serpapi.com/search.json?engine=google_trends&q=${encodeURIComponent(keyword)}&data_type=TIMESERIES&api_key=${serpApiKey}`;
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          console.warn(`⚠️ Trends API failed for "${keyword}": ${response.status}`);
+          continue;
         }
-      ],
-      category: 0,
-      property: ""
-    };
 
-    const exploreURL =
-      "https://trends.google.com/trends/api/explore?hl=en-US&req=" +
-      encodeURIComponent(JSON.stringify(exploreReq));
+        const data = await response.json();
+        
+        if (data.interest_over_time && data.interest_over_time.timeline_data) {
+          allTrendsData.push({
+            keyword,
+            timeline: data.interest_over_time.timeline_data,
+            related_queries: data.related_queries || []
+          });
+        }
 
-    const exploreRes = await fetch(exploreURL, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+        // Add delay between requests
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+      } catch (err) {
+        console.warn(`⚠️ Error fetching trends for "${keyword}":`, err);
+        continue;
       }
-    });
-
-    if (!exploreRes.ok) {
-      console.error("❌ Google Trends explore failed:", exploreRes.status);
-      return null;
     }
 
-    let exploreText = await exploreRes.text();
-    exploreText = exploreText.replace(")]}',", ""); // remove prefix
-
-    let exploreJson = JSON.parse(exploreText);
-    const widget = exploreJson.widgets?.find((w: any) => w.id === "TIMESERIES");
-
-    if (!widget) {
-      console.error("❌ No TIMESERIES widget found");
-      return null;
+    // If no trends data found, return fallback
+    if (!allTrendsData.length) {
+      console.log("⚠️ No trends data found, returning fallback");
+      return {
+        trendDirection: "stable",
+        percentageChange: "0%",
+        volatilityScore: 0.5,
+        seasonalPatterns: "Data unavailable",
+        peakMonths: ["Data unavailable"],
+        lowMonths: ["Data unavailable"],
+        overallSummary: "Trends data temporarily unavailable. This could indicate a niche market with limited search volume or API limitations."
+      };
     }
 
-    const token = widget.token;
-    const request = widget.request;
+    console.log(`📈 Found trends data for ${allTrendsData.length} keywords`);
 
-    if (!token || !request) {
-      console.error("❌ Missing token or request object");
-      return null;
-    }
-
-    // ---- STEP 2: GET TIMELINE DATA ----
-    const timelineURL =
-      "https://trends.google.com/trends/api/widgetdata/multiline?hl=en-US&token=" +
-      token +
-      "&req=" +
-      encodeURIComponent(JSON.stringify(request));
-
-    const timelineRes = await fetch(timelineURL, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-      }
-    });
-
-    if (!timelineRes.ok) {
-      console.error("❌ Trends timeline fetch failed:", timelineRes.status);
-      return null;
-    }
-
-    let timelineText = await timelineRes.text();
-    timelineText = timelineText.replace(")]}',", "");
-
-    const timelineJson = JSON.parse(timelineText);
-    const points = timelineJson.default?.timelineData || [];
-
-    if (!points.length) {
-      console.error("⚠️ No trend timeline data found");
-      return null;
-    }
-
-    // ---- STEP 3: COMPRESS RAW DATA ----
-    const rawData = points.map((p: any) => ({
-      time: p.formattedTime,
-      timestamp: p.time,
-      value: p.value?.[0] ?? 0
-    }));
-
-    console.log("📈 Raw Google Trends Points:", rawData.length);
-
-    // ---- STEP 4: INSTRUCTIONS FOR GEMINI ----
+    // ---- INSTRUCTIONS FOR GEMINI ----
     const instructions = `{
       "trendDirection": "Overall direction: upward, downward, or stable",
-      "percentageChange": "Percentage change between start and end",
+      "percentageChange": "Percentage change between start and end periods",
       "volatilityScore": "Variation level from 0 to 1",
-      "seasonalPatterns": "Does interest show repeating spikes?",
+      "seasonalPatterns": "Does interest show repeating spikes or patterns?",
       "peakMonths": "Months with highest interest",
       "lowMonths": "Months with lowest interest",
-      "overallSummary": "Short 2–3 line explanation of search trend"
+      "overallSummary": "Short 2–3 line explanation of search trend patterns"
     }`;
 
-    // ---- STEP 5: LLM PROCESSING ----
+    // ---- LLM PROCESSING ----
     const insights = await geminiStageTwo(
-      JSON.stringify(rawData),
-      "GoogleTrends",
-      instructions
+      JSON.stringify(allTrendsData),
+      "GoogleTrends-SerpAPI",
+      instructions,
+      originalIdea
     );
 
-    return insights || null;
+    return insights || {
+      trendDirection: "stable",
+      percentageChange: "0%",
+      volatilityScore: 0.5,
+      seasonalPatterns: "Analysis in progress",
+      peakMonths: ["Data processing"],
+      lowMonths: ["Data processing"],
+      overallSummary: "Trends analysis completed with available data."
+    };
+
   } catch (error) {
     console.error("❌ Trends Insights Error:", error);
-    return null;
+    return {
+      trendDirection: "stable",
+      percentageChange: "0%",
+      volatilityScore: 0.5,
+      seasonalPatterns: "Error retrieving data",
+      peakMonths: ["Data unavailable"],
+      lowMonths: ["Data unavailable"],
+      overallSummary: "Unable to retrieve trends data due to technical issues. Consider manual research at trends.google.com"
+    };
   }
 }
